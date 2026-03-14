@@ -1,1 +1,131 @@
-
+{
+  "hero": {
+    "badge": "Media Buyer & Digital Marketer",
+    "title": "Scalable Profit Engineering",
+    "subtitle": "I've managed $8,000,000+ in ad budgets to move e-commerce stores from stagnation to profitable scale. We don't buy clicks — we build systems that attract high-LTV customers.",
+    "stat1Value": "$8M+",
+    "stat1Label": "Ad Spend Managed",
+    "stat2Value": "3.2x",
+    "stat2Label": "Avg. ROAS",
+    "stat3Value": "150+",
+    "stat3Label": "Campaigns Optimized"
+  },
+  "about": {
+    "title": "About Me",
+    "description": "I'm a results-driven media buyer with over 7 years of experience in paid social advertising, conversion optimization, and data-driven marketing strategies. My approach combines analytical rigor with creative testing to deliver measurable ROI improvements for every client.\n\nI specialize in scaling e-commerce brands through systematic ad account optimization, audience development, and creative strategy. My clients typically see a 40-60% improvement in ROAS within the first 90 days of partnership.\n\nBeyond campaign management, I build automated reporting systems, develop attribution models, and create scalable processes that help teams make data-driven decisions faster.",
+    "image": ""
+  },
+  "projects": [
+    {
+      "id": "proj-1",
+      "title": "Fashion E-commerce Scale",
+      "category": "E-commerce",
+      "description": "Scaled a fashion e-commerce brand from $50K to $500K monthly ad spend while maintaining 4.2x ROAS. Implemented dynamic product ads, lookalike audiences, and automated bidding strategies.",
+      "spend": 500000,
+      "roas": "4.2x",
+      "image": "",
+      "link": ""
+    },
+    {
+      "id": "proj-2",
+      "title": "SaaS Lead Generation",
+      "category": "SaaS",
+      "description": "Built a lead generation system that reduced CPA by 60% while doubling monthly qualified leads. Created multi-touch attribution model to optimize full-funnel performance.",
+      "spend": 120000,
+      "roas": "3.8x",
+      "image": "",
+      "link": ""
+    },
+    {
+      "id": "proj-3",
+      "title": "DTC Brand Launch",
+      "category": "E-commerce",
+      "description": "Launched a direct-to-consumer brand from zero to $200K monthly revenue in 6 months. Developed creative testing framework that improved CTR by 85%.",
+      "spend": 180000,
+      "roas": "3.5x",
+      "image": "",
+      "link": ""
+    }
+  ],
+  "skills": [
+    { "id": "skill-1", "name": "Facebook Ads", "category": "Advertising", "level": 95 },
+    { "id": "skill-2", "name": "Google Ads", "category": "Advertising", "level": 90 },
+    { "id": "skill-3", "name": "TikTok Ads", "category": "Advertising", "level": 85 },
+    { "id": "skill-4", "name": "Data Analysis", "category": "Analytics", "level": 92 },
+    { "id": "skill-5", "name": "Google Analytics", "category": "Analytics", "level": 88 },
+    { "id": "skill-6", "name": "Conversion Optimization", "category": "Strategy", "level": 90 },
+    { "id": "skill-7", "name": "Creative Strategy", "category": "Creative", "level": 85 },
+    { "id": "skill-8", "name": "A/B Testing", "category": "Technical", "level": 88 }
+  ],
+  "experience": [
+    {
+      "id": "exp-1",
+      "title": "Senior Media Buyer",
+      "company": "Performance Marketing Agency",
+      "period": "2021 - Present",
+      "location": "Remote",
+      "description": "Managing $2M+ monthly ad spend across multiple e-commerce brands. Achieved average 3.5x ROAS across portfolio. Built automated reporting dashboards and creative testing frameworks."
+    },
+    {
+      "id": "exp-2",
+      "title": "Media Buyer",
+      "company": "Digital Growth Agency",
+      "period": "2019 - 2021",
+      "location": "New York, NY",
+      "description": "Managed Facebook and Google ad campaigns for 15+ e-commerce clients. Reduced average CPA by 35% through systematic optimization and creative testing."
+    },
+    {
+      "id": "exp-3",
+      "title": "Marketing Specialist",
+      "company": "Tech Startup",
+      "period": "2017 - 2019",
+      "location": "San Francisco, CA",
+      "description": "Built paid acquisition channels from scratch, growing monthly spend from $5K to $150K. Implemented tracking infrastructure and attribution modeling."
+    }
+  ],
+  "services": [
+    {
+      "id": "srv-1",
+      "title": "Paid Advertising",
+      "description": "Full-funnel paid social and search advertising campaigns on Facebook, Instagram, Google, and TikTok. From strategy to execution and ongoing optimization.",
+      "icon": "target"
+    },
+    {
+      "id": "srv-2",
+      "title": "Conversion Optimization",
+      "description": "Data-driven landing page optimization, A/B testing, and funnel analysis to maximize ROI. Identify and fix conversion bottlenecks.",
+      "icon": "chart"
+    },
+    {
+      "id": "srv-3",
+      "title": "Analytics & Attribution",
+      "description": "Custom dashboards, tracking implementation, and attribution modeling to make data-driven decisions with confidence.",
+      "icon": "analytics"
+    },
+    {
+      "id": "srv-4",
+      "title": "Creative Strategy",
+      "description": "Systematic creative testing frameworks and ad production workflows to continuously improve ad performance.",
+      "icon": "creative"
+    }
+  ],
+  "contact": {
+    "email": "contact@mediabuyer.com",
+    "phone": "+1 (555) 123-4567",
+    "linkedin": "https://linkedin.com/in/mediabuyer",
+    "twitter": "https://twitter.com/mediabuyer",
+    "whatsapp": "+1234567890",
+    "whatsappEnabled": true,
+    "whatsappMessage": "Hi! I saw your portfolio and would like to discuss a potential project."
+  },
+  "settings": {
+    "siteTitle": "Media Buyer Portfolio",
+    "siteDescription": "Portfolio website for a Media Buyer / Digital Marketer specializing in profitable scale systems and high-LTV customer acquisition.",
+    "siteKeywords": "Media Buyer, Digital Marketer, Ad Campaign Optimization, ROAS, CPA, KPI Dashboard",
+    "googleAnalytics": "",
+    "primaryColor": "#0E7C86",
+    "accentColor": "#FF6B5F",
+    "roasThreshold": 1.5,
+    "cpaMultiplier": 1.3
+  }
+}
