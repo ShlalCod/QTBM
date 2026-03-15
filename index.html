@@ -1404,31 +1404,10 @@
         </a>
     </div>
     
+    <!-- Content Loader (loads dynamic content from admin panel) -->
+    <script src="js/content-loader.js"></script>
+    
     <!-- Main JavaScript -->
     <script src="js/script.js"></script>
-    
-    <!-- Content Loader (loads dynamic content from admin panel) -->
-    <script>
-        // Load WhatsApp button settings
-        document.addEventListener('DOMContentLoaded', async function() {
-            try {
-                const response = await fetch('data/content.json');
-                if (response.ok) {
-                    const content = await response.json();
-                    
-                    // WhatsApp button
-                    if (content.contact?.whatsappEnabled && content.contact?.whatsapp) {
-                        const whatsappBtn = document.getElementById('whatsapp-button');
-                        const whatsappLink = document.getElementById('whatsapp-link');
-                        const message = encodeURIComponent(content.contact.whatsappMessage || 'Hi! I saw your portfolio...');
-                        whatsappLink.href = `https://wa.me/${content.contact.whatsapp.replace(/[^0-9]/g, '')}?text=${message}`;
-                        whatsappBtn.hidden = false;
-                    }
-                }
-            } catch (error) {
-                console.log('Content loader:', error);
-            }
-        });
-    </script>
 </body>
 </html>
