@@ -2,7 +2,7 @@
  * Admin Panel JavaScript
  * Optional Netlify Identity Authentication + Content Management
  * 
- * Updated: Identity is now optional - works without Netlify Identity
+ * Updated: Identity is optional with auto-timeout
  */
 
 'use strict';
@@ -13,12 +13,13 @@
 const AdminState = {
     currentUser: null,
     isAuthenticated: false,
-    isAdmin: true, // Default to true for single-user mode
+    isAdmin: true,
     content: null,
     hasUnsavedChanges: false,
     currentSection: 'dashboard',
-    useIdentity: false, // Track if Netlify Identity is being used
-    identityAvailable: false
+    useIdentity: false,
+    identityAvailable: false,
+    initialized: false
 };
 
 // Default content structure
@@ -77,6 +78,7 @@ function escapeHtml(str) {
 
 function showToast(message, type = '') {
     const container = document.getElementById('toast-container');
+    if (!container) return;
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.textContent = message;
@@ -101,21 +103,41 @@ function showScreen(screenId) {
 }
 
 // ============================================
+// Direct Admin Access (Skip Identity)
+// ============================================
+
+function goDirectlyToAdmin() {
+    if (AdminState.initialized) return;
+    AdminState.initialized = true;
+    
+    console.log('Going directly to admin panel (standalone mode)');
+    AdminState.identityAvailable = false;
+    AdminState.useIdentity = false;
+    
+    showScreen('admin-panel');
+    updateUserInfo(null);
+    loadContent();
+    initAdminPanel();
+    showToast('Running in standalone mode', 'info');
+}
+
+// ============================================
 // Netlify Identity Management (Optional)
 // ============================================
 
 function initNetlifyIdentity() {
-    // Check if Netlify Identity is available
+    // Set a timeout to auto-proceed if Identity takes too long
+    const identityTimeout = setTimeout(() => {
+        if (!AdminState.initialized) {
+            console.log('Identity timeout - proceeding to admin');
+            goDirectlyToAdmin();
+        }
+    }, 3000); // 3 seconds timeout
+
+    // Check if Netlify Identity script loaded
     if (typeof netlifyIdentity === 'undefined') {
-        console.log('Netlify Identity not available - running in standalone mode');
-        AdminState.identityAvailable = false;
-        AdminState.useIdentity = false;
-        
-        // Go directly to admin panel in standalone mode
-        showScreen('admin-panel');
-        updateUserInfo(null);
-        loadContent();
-        initAdminPanel();
+        clearTimeout(identityTimeout);
+        goDirectlyToAdmin();
         return;
     }
 
@@ -128,12 +150,15 @@ function initNetlifyIdentity() {
 
         // Listen for auth events
         netlifyIdentity.on('init', user => {
+            clearTimeout(identityTimeout);
+            if (AdminState.initialized) return;
+            AdminState.initialized = true;
+            
             console.log('Netlify Identity initialized', user);
             if (user) {
                 AdminState.useIdentity = true;
                 handleAuthenticatedUser(user);
             } else {
-                // Show login screen but with option to skip
                 showLoginScreenWithSkip();
             }
         });
@@ -155,44 +180,46 @@ function initNetlifyIdentity() {
 
         netlifyIdentity.on('error', err => {
             console.error('Netlify Identity error:', err);
-            // Don't block access on error - fallback to standalone
-            showScreen('admin-panel');
-            updateUserInfo(null);
-            loadContent();
-            initAdminPanel();
+            clearTimeout(identityTimeout);
+            goDirectlyToAdmin();
         });
 
-        // Setup login/signup buttons
-        document.getElementById('login-btn')?.addEventListener('click', () => {
-            netlifyIdentity.open('login');
-        });
+        // Setup buttons
+        setupIdentityButtons();
 
-        document.getElementById('signup-btn')?.addEventListener('click', () => {
-            netlifyIdentity.open('signup');
-        });
-
-        document.getElementById('logout-btn')?.addEventListener('click', () => {
-            if (AdminState.useIdentity && typeof netlifyIdentity !== 'undefined') {
-                netlifyIdentity.logout();
-            } else {
-                // Just refresh page in standalone mode
-                window.location.reload();
-            }
-        });
-
-        document.getElementById('logout-btn-denied')?.addEventListener('click', () => {
-            if (typeof netlifyIdentity !== 'undefined') {
-                netlifyIdentity.logout();
-            }
-        });
     } catch (error) {
         console.error('Error initializing Netlify Identity:', error);
-        // Fallback to standalone mode
-        showScreen('admin-panel');
-        updateUserInfo(null);
-        loadContent();
-        initAdminPanel();
+        clearTimeout(identityTimeout);
+        goDirectlyToAdmin();
     }
+}
+
+function setupIdentityButtons() {
+    document.getElementById('login-btn')?.addEventListener('click', () => {
+        if (typeof netlifyIdentity !== 'undefined') {
+            netlifyIdentity.open('login');
+        }
+    });
+
+    document.getElementById('signup-btn')?.addEventListener('click', () => {
+        if (typeof netlifyIdentity !== 'undefined') {
+            netlifyIdentity.open('signup');
+        }
+    });
+
+    document.getElementById('logout-btn')?.addEventListener('click', () => {
+        if (AdminState.useIdentity && typeof netlifyIdentity !== 'undefined') {
+            netlifyIdentity.logout();
+        } else {
+            window.location.reload();
+        }
+    });
+
+    document.getElementById('logout-btn-denied')?.addEventListener('click', () => {
+        if (typeof netlifyIdentity !== 'undefined') {
+            netlifyIdentity.logout();
+        }
+    });
 }
 
 function showLoginScreenWithSkip() {
@@ -231,14 +258,8 @@ function showLoginScreenWithSkip() {
 function handleAuthenticatedUser(user) {
     AdminState.currentUser = user;
     AdminState.isAuthenticated = true;
+    AdminState.isAdmin = true; // Allow access
     
-    // Check for admin role (relaxed check)
-    const roles = user.app_metadata?.roles || [];
-    AdminState.isAdmin = roles.includes('admin') || user.email === user.app_metadata?.owner_email || true;
-    
-    console.log('User roles:', roles, 'Is admin:', AdminState.isAdmin);
-    
-    // Always allow access for site owner
     showScreen('admin-panel');
     updateUserInfo(user);
     loadContent();
@@ -260,7 +281,6 @@ function updateUserInfo(user) {
         }
         role.textContent = AdminState.isAdmin ? 'Administrator' : 'Editor';
     } else {
-        // Standalone mode
         name.textContent = 'Admin';
         avatar.textContent = 'A';
         role.textContent = 'Local Administrator';
@@ -273,12 +293,10 @@ function updateUserInfo(user) {
 
 async function loadContent() {
     try {
-        // Try to fetch from API first
         const response = await fetch('/api/content');
         if (response.ok) {
             AdminState.content = await response.json();
         } else {
-            // Fall back to localStorage
             const stored = localStorage.getItem('portfolio_content');
             AdminState.content = stored ? JSON.parse(stored) : JSON.parse(JSON.stringify(DefaultContent));
         }
@@ -293,23 +311,16 @@ async function loadContent() {
 }
 
 function saveContent() {
-    // Always save to localStorage as backup
     localStorage.setItem('portfolio_content', JSON.stringify(AdminState.content));
-    
-    // Try to save via API
     saveToAPI();
-    
     AdminState.hasUnsavedChanges = false;
     showToast('Content saved successfully!', 'success');
 }
 
 async function saveToAPI() {
     try {
-        const headers = {
-            'Content-Type': 'application/json'
-        };
+        const headers = { 'Content-Type': 'application/json' };
         
-        // Add auth token if using Identity
         if (AdminState.useIdentity && typeof netlifyIdentity !== 'undefined') {
             const user = netlifyIdentity.currentUser();
             if (user) {
@@ -326,8 +337,6 @@ async function saveToAPI() {
         
         if (response.ok) {
             console.log('Content saved to API');
-        } else {
-            console.log('API save failed, content saved locally');
         }
     } catch (error) {
         console.log('API save error:', error);
@@ -339,48 +348,78 @@ function populateForms() {
     
     // Hero form
     if (content.hero) {
-        document.getElementById('hero-badge').value = content.hero.badge || '';
-        document.getElementById('hero-title-input').value = content.hero.title || '';
-        document.getElementById('hero-subtitle').value = content.hero.subtitle || '';
-        document.getElementById('hero-stat1-value').value = content.hero.stat1Value || '';
-        document.getElementById('hero-stat1-label').value = content.hero.stat1Label || '';
-        document.getElementById('hero-stat2-value').value = content.hero.stat2Value || '';
-        document.getElementById('hero-stat2-label').value = content.hero.stat2Label || '';
-        document.getElementById('hero-stat3-value').value = content.hero.stat3Value || '';
-        document.getElementById('hero-stat3-label').value = content.hero.stat3Label || '';
+        const heroBadge = document.getElementById('hero-badge');
+        const heroTitle = document.getElementById('hero-title-input');
+        const heroSubtitle = document.getElementById('hero-subtitle');
+        const heroStat1Value = document.getElementById('hero-stat1-value');
+        const heroStat1Label = document.getElementById('hero-stat1-label');
+        const heroStat2Value = document.getElementById('hero-stat2-value');
+        const heroStat2Label = document.getElementById('hero-stat2-label');
+        const heroStat3Value = document.getElementById('hero-stat3-value');
+        const heroStat3Label = document.getElementById('hero-stat3-label');
+        
+        if (heroBadge) heroBadge.value = content.hero.badge || '';
+        if (heroTitle) heroTitle.value = content.hero.title || '';
+        if (heroSubtitle) heroSubtitle.value = content.hero.subtitle || '';
+        if (heroStat1Value) heroStat1Value.value = content.hero.stat1Value || '';
+        if (heroStat1Label) heroStat1Label.value = content.hero.stat1Label || '';
+        if (heroStat2Value) heroStat2Value.value = content.hero.stat2Value || '';
+        if (heroStat2Label) heroStat2Label.value = content.hero.stat2Label || '';
+        if (heroStat3Value) heroStat3Value.value = content.hero.stat3Value || '';
+        if (heroStat3Label) heroStat3Label.value = content.hero.stat3Label || '';
     }
     
     // About form
     if (content.about) {
-        document.getElementById('about-title').value = content.about.title || '';
-        document.getElementById('about-description').value = content.about.description || '';
-        document.getElementById('about-image').value = content.about.image || '';
+        const aboutTitle = document.getElementById('about-title');
+        const aboutDesc = document.getElementById('about-description');
+        const aboutImage = document.getElementById('about-image');
+        
+        if (aboutTitle) aboutTitle.value = content.about.title || '';
+        if (aboutDesc) aboutDesc.value = content.about.description || '';
+        if (aboutImage) aboutImage.value = content.about.image || '';
     }
     
     // Contact form
     if (content.contact) {
-        document.getElementById('contact-email').value = content.contact.email || '';
-        document.getElementById('contact-phone').value = content.contact.phone || '';
-        document.getElementById('contact-linkedin').value = content.contact.linkedin || '';
-        document.getElementById('contact-twitter').value = content.contact.twitter || '';
-        document.getElementById('contact-whatsapp').value = content.contact.whatsapp || '';
-        document.getElementById('whatsapp-enabled').checked = content.contact.whatsappEnabled !== false;
-        document.getElementById('contact-whatsapp-message').value = content.contact.whatsappMessage || '';
+        const contactEmail = document.getElementById('contact-email');
+        const contactPhone = document.getElementById('contact-phone');
+        const contactLinkedin = document.getElementById('contact-linkedin');
+        const contactTwitter = document.getElementById('contact-twitter');
+        const contactWhatsapp = document.getElementById('contact-whatsapp');
+        const whatsappEnabled = document.getElementById('whatsapp-enabled');
+        const whatsappMessage = document.getElementById('contact-whatsapp-message');
+        
+        if (contactEmail) contactEmail.value = content.contact.email || '';
+        if (contactPhone) contactPhone.value = content.contact.phone || '';
+        if (contactLinkedin) contactLinkedin.value = content.contact.linkedin || '';
+        if (contactTwitter) contactTwitter.value = content.contact.twitter || '';
+        if (contactWhatsapp) contactWhatsapp.value = content.contact.whatsapp || '';
+        if (whatsappEnabled) whatsappEnabled.checked = content.contact.whatsappEnabled !== false;
+        if (whatsappMessage) whatsappMessage.value = content.contact.whatsappMessage || '';
     }
     
     // Settings form
     if (content.settings) {
-        document.getElementById('site-title').value = content.settings.siteTitle || '';
-        document.getElementById('site-description').value = content.settings.siteDescription || '';
-        document.getElementById('site-keywords').value = content.settings.siteKeywords || '';
-        document.getElementById('google-analytics').value = content.settings.googleAnalytics || '';
-        document.getElementById('primary-color').value = content.settings.primaryColor || '#0E7C86';
-        document.getElementById('accent-color').value = content.settings.accentColor || '#FF6B5F';
-        document.getElementById('audit-roas').value = content.settings.roasThreshold || 1.5;
-        document.getElementById('audit-cpa').value = content.settings.cpaMultiplier || 1.3;
+        const siteTitle = document.getElementById('site-title');
+        const siteDesc = document.getElementById('site-description');
+        const siteKeywords = document.getElementById('site-keywords');
+        const googleAnalytics = document.getElementById('google-analytics');
+        const primaryColor = document.getElementById('primary-color');
+        const accentColor = document.getElementById('accent-color');
+        const auditRoas = document.getElementById('audit-roas');
+        const auditCpa = document.getElementById('audit-cpa');
+        
+        if (siteTitle) siteTitle.value = content.settings.siteTitle || '';
+        if (siteDesc) siteDesc.value = content.settings.siteDescription || '';
+        if (siteKeywords) siteKeywords.value = content.settings.siteKeywords || '';
+        if (googleAnalytics) googleAnalytics.value = content.settings.googleAnalytics || '';
+        if (primaryColor) primaryColor.value = content.settings.primaryColor || '#0E7C86';
+        if (accentColor) accentColor.value = content.settings.accentColor || '#FF6B5F';
+        if (auditRoas) auditRoas.value = content.settings.roasThreshold || 1.5;
+        if (auditCpa) auditCpa.value = content.settings.cpaMultiplier || 1.3;
     }
     
-    // Render lists
     renderProjectsList();
     renderSkillsList();
     renderExperienceList();
@@ -388,10 +427,15 @@ function populateForms() {
 }
 
 function updateDashboardCounts() {
-    document.getElementById('projects-count').textContent = AdminState.content.projects?.length || 0;
-    document.getElementById('skills-count').textContent = AdminState.content.skills?.length || 0;
-    document.getElementById('experience-count').textContent = AdminState.content.experience?.length || 0;
-    document.getElementById('services-count').textContent = AdminState.content.services?.length || 0;
+    const projectsCount = document.getElementById('projects-count');
+    const skillsCount = document.getElementById('skills-count');
+    const expCount = document.getElementById('experience-count');
+    const servicesCount = document.getElementById('services-count');
+    
+    if (projectsCount) projectsCount.textContent = AdminState.content.projects?.length || 0;
+    if (skillsCount) skillsCount.textContent = AdminState.content.skills?.length || 0;
+    if (expCount) expCount.textContent = AdminState.content.experience?.length || 0;
+    if (servicesCount) servicesCount.textContent = AdminState.content.services?.length || 0;
 }
 
 // ============================================
@@ -405,7 +449,6 @@ function initAdminPanel() {
     initQuickActions();
     initSidebar();
     
-    // Warn before leaving with unsaved changes
     window.addEventListener('beforeunload', (e) => {
         if (AdminState.hasUnsavedChanges) {
             e.preventDefault();
@@ -415,9 +458,7 @@ function initAdminPanel() {
 }
 
 function initNavigation() {
-    const navItems = document.querySelectorAll('.nav-item');
-    
-    navItems.forEach(item => {
+    document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const section = item.dataset.section;
@@ -427,17 +468,14 @@ function initNavigation() {
 }
 
 function navigateToSection(sectionId) {
-    // Update nav items
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.section === sectionId);
     });
     
-    // Update sections
     document.querySelectorAll('.admin-section').forEach(section => {
         section.classList.toggle('active', section.id === `section-${sectionId}`);
     });
     
-    // Update title
     const titles = {
         dashboard: 'Dashboard',
         hero: 'Hero Section',
@@ -450,10 +488,10 @@ function navigateToSection(sectionId) {
         settings: 'Settings'
     };
     
-    document.getElementById('page-title').textContent = titles[sectionId] || 'Dashboard';
+    const pageTitle = document.getElementById('page-title');
+    if (pageTitle) pageTitle.textContent = titles[sectionId] || 'Dashboard';
     AdminState.currentSection = sectionId;
     
-    // Close mobile sidebar
     document.querySelector('.admin-sidebar')?.classList.remove('open');
 }
 
@@ -465,7 +503,6 @@ function initSidebar() {
         sidebar?.classList.toggle('open');
     });
     
-    // Close sidebar on click outside on mobile
     document.addEventListener('click', (e) => {
         if (window.innerWidth < 1024 && 
             sidebar?.classList.contains('open') && 
@@ -486,15 +523,15 @@ function initForms() {
         e.preventDefault();
         const form = e.target;
         AdminState.content.hero = {
-            badge: form.badge.value,
-            title: form.title.value,
-            subtitle: form.subtitle.value,
-            stat1Value: form.stat1Value.value,
-            stat1Label: form.stat1Label.value,
-            stat2Value: form.stat2Value.value,
-            stat2Label: form.stat2Label.value,
-            stat3Value: form.stat3Value.value,
-            stat3Label: form.stat3Label.value
+            badge: form.badge?.value || '',
+            title: form.title?.value || '',
+            subtitle: form.subtitle?.value || '',
+            stat1Value: form.stat1Value?.value || '',
+            stat1Label: form.stat1Label?.value || '',
+            stat2Value: form.stat2Value?.value || '',
+            stat2Label: form.stat2Label?.value || '',
+            stat3Value: form.stat3Value?.value || '',
+            stat3Label: form.stat3Label?.value || ''
         };
         saveContent();
     });
@@ -504,9 +541,9 @@ function initForms() {
         e.preventDefault();
         const form = e.target;
         AdminState.content.about = {
-            title: form.title.value,
-            description: form.description.value,
-            image: form.image.value
+            title: form.title?.value || '',
+            description: form.description?.value || '',
+            image: form.image?.value || ''
         };
         saveContent();
     });
@@ -516,13 +553,13 @@ function initForms() {
         e.preventDefault();
         const form = e.target;
         AdminState.content.contact = {
-            email: form.email.value,
-            phone: form.phone.value,
-            linkedin: form.linkedin.value,
-            twitter: form.twitter.value,
-            whatsapp: form.whatsapp.value,
-            whatsappEnabled: form.whatsappEnabled.checked,
-            whatsappMessage: form.whatsappMessage.value
+            email: form.email?.value || '',
+            phone: form.phone?.value || '',
+            linkedin: form.linkedin?.value || '',
+            twitter: form.twitter?.value || '',
+            whatsapp: form.whatsapp?.value || '',
+            whatsappEnabled: form.whatsappEnabled?.checked ?? true,
+            whatsappMessage: form.whatsappMessage?.value || ''
         };
         saveContent();
     });
@@ -532,22 +569,20 @@ function initForms() {
         e.preventDefault();
         const form = e.target;
         AdminState.content.settings = {
-            siteTitle: form.siteTitle.value,
-            siteDescription: form.siteDescription.value,
-            siteKeywords: form.siteKeywords.value,
-            googleAnalytics: form.googleAnalytics.value,
-            primaryColor: form.primaryColor.value,
-            accentColor: form.accentColor.value,
-            roasThreshold: parseFloat(form.roasThreshold.value),
-            cpaMultiplier: parseFloat(form.cpaMultiplier.value)
+            siteTitle: form.siteTitle?.value || '',
+            siteDescription: form.siteDescription?.value || '',
+            siteKeywords: form.siteKeywords?.value || '',
+            googleAnalytics: form.googleAnalytics?.value || '',
+            primaryColor: form.primaryColor?.value || '#0E7C86',
+            accentColor: form.accentColor?.value || '#FF6B5F',
+            roasThreshold: parseFloat(form.roasThreshold?.value) || 1.5,
+            cpaMultiplier: parseFloat(form.cpaMultiplier?.value) || 1.3
         };
         saveContent();
     });
     
     // Save all button
-    document.getElementById('save-all-btn')?.addEventListener('click', () => {
-        saveContent();
-    });
+    document.getElementById('save-all-btn')?.addEventListener('click', saveContent);
     
     // Track changes
     document.querySelectorAll('.editor-form input, .editor-form textarea').forEach(input => {
@@ -558,11 +593,12 @@ function initForms() {
 }
 
 // ============================================
-// Items Management (Projects, Skills, etc.)
+// Items Management
 // ============================================
 
 function renderProjectsList() {
     const container = document.getElementById('projects-list');
+    if (!container) return;
     const projects = AdminState.content.projects || [];
     
     if (projects.length === 0) {
@@ -582,18 +618,8 @@ function renderProjectsList() {
                 <div class="item-meta">${escapeHtml(project.category || '')} ${project.roas ? `• ROAS: ${project.roas}` : ''}</div>
             </div>
             <div class="item-actions">
-                <button class="btn btn-icon btn-sm" onclick="editProject(${index})" title="Edit">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                </button>
-                <button class="btn btn-icon btn-sm" onclick="deleteProject(${index})" title="Delete">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
+                <button class="btn btn-icon btn-sm" onclick="editProject(${index})" title="Edit">✏️</button>
+                <button class="btn btn-icon btn-sm" onclick="deleteProject(${index})" title="Delete">🗑️</button>
             </div>
         </div>
     `).join('');
@@ -601,6 +627,7 @@ function renderProjectsList() {
 
 function renderSkillsList() {
     const container = document.getElementById('skills-list');
+    if (!container) return;
     const skills = AdminState.content.skills || [];
     
     if (skills.length === 0) {
@@ -620,18 +647,8 @@ function renderSkillsList() {
                 <div class="item-meta">${escapeHtml(skill.category || '')} ${skill.level ? `• Level: ${skill.level}%` : ''}</div>
             </div>
             <div class="item-actions">
-                <button class="btn btn-icon btn-sm" onclick="editSkill(${index})" title="Edit">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                </button>
-                <button class="btn btn-icon btn-sm" onclick="deleteSkill(${index})" title="Delete">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
+                <button class="btn btn-icon btn-sm" onclick="editSkill(${index})" title="Edit">✏️</button>
+                <button class="btn btn-icon btn-sm" onclick="deleteSkill(${index})" title="Delete">🗑️</button>
             </div>
         </div>
     `).join('');
@@ -639,6 +656,7 @@ function renderSkillsList() {
 
 function renderExperienceList() {
     const container = document.getElementById('experience-list');
+    if (!container) return;
     const experiences = AdminState.content.experience || [];
     
     if (experiences.length === 0) {
@@ -658,18 +676,8 @@ function renderExperienceList() {
                 <div class="item-meta">${escapeHtml(exp.company || '')} ${exp.period ? `• ${exp.period}` : ''}</div>
             </div>
             <div class="item-actions">
-                <button class="btn btn-icon btn-sm" onclick="editExperience(${index})" title="Edit">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                </button>
-                <button class="btn btn-icon btn-sm" onclick="deleteExperience(${index})" title="Delete">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
+                <button class="btn btn-icon btn-sm" onclick="editExperience(${index})" title="Edit">✏️</button>
+                <button class="btn btn-icon btn-sm" onclick="deleteExperience(${index})" title="Delete">🗑️</button>
             </div>
         </div>
     `).join('');
@@ -677,6 +685,7 @@ function renderExperienceList() {
 
 function renderServicesList() {
     const container = document.getElementById('services-list');
+    if (!container) return;
     const services = AdminState.content.services || [];
     
     if (services.length === 0) {
@@ -696,18 +705,8 @@ function renderServicesList() {
                 <div class="item-meta">${escapeHtml(service.description?.substring(0, 50) || '')}${service.description?.length > 50 ? '...' : ''}</div>
             </div>
             <div class="item-actions">
-                <button class="btn btn-icon btn-sm" onclick="editService(${index})" title="Edit">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                </button>
-                <button class="btn btn-icon btn-sm" onclick="deleteService(${index})" title="Delete">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
+                <button class="btn btn-icon btn-sm" onclick="editService(${index})" title="Edit">✏️</button>
+                <button class="btn btn-icon btn-sm" onclick="deleteService(${index})" title="Delete">🗑️</button>
             </div>
         </div>
     `).join('');
@@ -720,7 +719,6 @@ function renderServicesList() {
 let currentModalContext = null;
 
 function initModals() {
-    // Close modal handlers
     document.querySelectorAll('.modal-backdrop, .modal-cancel').forEach(el => {
         el.addEventListener('click', closeModal);
     });
@@ -729,14 +727,10 @@ function initModals() {
         el.addEventListener('click', closeModal);
     });
     
-    // Save modal handler
     document.querySelector('.modal-save')?.addEventListener('click', saveModalData);
-    
-    // Confirm dialog handlers
     document.querySelector('.confirm-cancel')?.addEventListener('click', closeConfirm);
     document.querySelector('.confirm-backdrop')?.addEventListener('click', closeConfirm);
     
-    // Add buttons
     document.getElementById('add-project-btn')?.addEventListener('click', () => openProjectModal());
     document.getElementById('add-skill-btn')?.addEventListener('click', () => openSkillModal());
     document.getElementById('add-experience-btn')?.addEventListener('click', () => openExperienceModal());
@@ -744,18 +738,23 @@ function initModals() {
 }
 
 function openModal(title, content) {
-    document.getElementById('modal-title').textContent = title;
-    document.getElementById('modal-body').innerHTML = content;
-    document.getElementById('item-modal').hidden = false;
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+    const modal = document.getElementById('item-modal');
+    
+    if (modalTitle) modalTitle.textContent = title;
+    if (modalBody) modalBody.innerHTML = content;
+    if (modal) modal.hidden = false;
 }
 
 function closeModal() {
-    document.getElementById('item-modal').hidden = true;
+    const modal = document.getElementById('item-modal');
+    if (modal) modal.hidden = true;
     currentModalContext = null;
 }
 
 function openProjectModal(index = null) {
-    const project = index !== null ? AdminState.content.projects[index] : {};
+    const project = index !== null ? AdminState.content.projects?.[index] : {};
     currentModalContext = { type: 'project', index };
     
     openModal(index !== null ? 'Edit Project' : 'Add Project', `
@@ -795,7 +794,7 @@ function openProjectModal(index = null) {
 }
 
 function openSkillModal(index = null) {
-    const skill = index !== null ? AdminState.content.skills[index] : {};
+    const skill = index !== null ? AdminState.content.skills?.[index] : {};
     currentModalContext = { type: 'skill', index };
     
     openModal(index !== null ? 'Edit Skill' : 'Add Skill', `
@@ -825,7 +824,7 @@ function openSkillModal(index = null) {
 }
 
 function openExperienceModal(index = null) {
-    const exp = index !== null ? AdminState.content.experience[index] : {};
+    const exp = index !== null ? AdminState.content.experience?.[index] : {};
     currentModalContext = { type: 'experience', index };
     
     openModal(index !== null ? 'Edit Experience' : 'Add Experience', `
@@ -857,7 +856,7 @@ function openExperienceModal(index = null) {
 }
 
 function openServiceModal(index = null) {
-    const service = index !== null ? AdminState.content.services[index] : {};
+    const service = index !== null ? AdminState.content.services?.[index] : {};
     currentModalContext = { type: 'service', index };
     
     openModal(index !== null ? 'Edit Service' : 'Add Service', `
@@ -883,10 +882,11 @@ function saveModalData() {
     
     const { type, index } = currentModalContext;
     const form = document.querySelector('#modal-body form');
+    if (!form) return;
+    
     const formData = new FormData(form);
     const data = Object.fromEntries(formData.entries());
     
-    // Convert numeric fields
     if (data.level) data.level = parseInt(data.level);
     if (data.spend) data.spend = parseFloat(data.spend);
     
@@ -984,14 +984,19 @@ function deleteService(index) {
 let confirmCallback = null;
 
 function showConfirm(title, message, callback) {
-    document.getElementById('confirm-title').textContent = title;
-    document.getElementById('confirm-message').textContent = message;
-    document.getElementById('confirm-dialog').hidden = false;
+    const confirmTitle = document.getElementById('confirm-title');
+    const confirmMsg = document.getElementById('confirm-message');
+    const confirmDialog = document.getElementById('confirm-dialog');
+    
+    if (confirmTitle) confirmTitle.textContent = title;
+    if (confirmMsg) confirmMsg.textContent = message;
+    if (confirmDialog) confirmDialog.hidden = false;
     confirmCallback = callback;
 }
 
 function closeConfirm() {
-    document.getElementById('confirm-dialog').hidden = true;
+    const confirmDialog = document.getElementById('confirm-dialog');
+    if (confirmDialog) confirmDialog.hidden = true;
     confirmCallback = null;
 }
 
@@ -1056,7 +1061,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initNetlifyIdentity();
 });
 
-// Make functions globally available for onclick handlers
+// Make functions globally available
 window.editProject = editProject;
 window.editSkill = editSkill;
 window.editExperience = editExperience;
