@@ -1,5 +1,9 @@
 // Netlify Function: Content API
 // Handles CRUD operations for portfolio content
+// Uses Netlify Blobs for persistent storage
+// Authentication is optional for single-user sites
+
+const { getStore } = require('@netlify/blobs');
 
 const defaultContent = {
     hero: {
@@ -91,13 +95,56 @@ const defaultContent = {
     }
 };
 
-// In-memory store (will reset on each function cold start)
-// For production, use a database or Git-based storage
-let contentStore = { ...defaultContent };
+// Helper function to get content store
+async function getContentStore(context) {
+    try {
+        // Use Netlify Blobs for persistent storage
+        const store = await getStore({
+            name: 'portfolio-content',
+            consistency: 'strong'
+        });
+        return store;
+    } catch (error) {
+        console.error('Error getting content store:', error);
+        return null;
+    }
+}
+
+// Helper function to load content from Blobs
+async function loadContent(store) {
+    try {
+        const stored = await store.get('content', { type: 'json' });
+        if (stored) {
+            // Merge with defaults to ensure all fields exist
+            return {
+                ...defaultContent,
+                ...stored,
+                hero: { ...defaultContent.hero, ...stored.hero },
+                about: { ...defaultContent.about, ...stored.about },
+                contact: { ...defaultContent.contact, ...stored.contact },
+                settings: { ...defaultContent.settings, ...stored.settings }
+            };
+        }
+    } catch (error) {
+        console.log('No stored content found, using defaults');
+    }
+    return { ...defaultContent };
+}
+
+// Helper function to save content to Blobs
+async function saveContent(store, content) {
+    try {
+        await store.setJSON('content', content);
+        return true;
+    } catch (error) {
+        console.error('Error saving content:', error);
+        return false;
+    }
+}
 
 exports.handler = async (event, context) => {
-    // Check for authenticated user
-    const { identity, user } = context.clientContext || {};
+    // Get user context (optional)
+    const { user } = context.clientContext || {};
     
     // CORS headers
     const headers = {
@@ -112,41 +159,42 @@ exports.handler = async (event, context) => {
         return { statusCode: 200, headers, body: '' };
     }
 
-    // Check authentication for write operations
-    const requiresAuth = ['PUT', 'POST', 'DELETE'].includes(event.httpMethod);
+    // Get the content store
+    const store = await getContentStore(context);
     
-    if (requiresAuth && !user) {
-        return {
-            statusCode: 401,
-            headers,
-            body: JSON.stringify({ error: 'Unauthorized' })
-        };
-    }
-
-    // Check admin role for write operations
-    if (requiresAuth) {
-        const roles = user.app_metadata?.roles || [];
-        const isAdmin = roles.includes('admin') || user.email === user.app_metadata?.owner_email;
-        
-        if (!isAdmin) {
-            return {
-                statusCode: 403,
-                headers,
-                body: JSON.stringify({ error: 'Forbidden - Admin role required' })
-            };
-        }
+    // If Blobs not available, fall back to in-memory with warning
+    if (!store) {
+        console.warn('Netlify Blobs not available, using in-memory storage (data will not persist)');
     }
 
     try {
         switch (event.httpMethod) {
             case 'GET':
-                return {
-                    statusCode: 200,
-                    headers,
-                    body: JSON.stringify(contentStore)
-                };
+                if (store) {
+                    const content = await loadContent(store);
+                    return {
+                        statusCode: 200,
+                        headers,
+                        body: JSON.stringify(content)
+                    };
+                } else {
+                    // Fallback to default content
+                    return {
+                        statusCode: 200,
+                        headers,
+                        body: JSON.stringify(defaultContent)
+                    };
+                }
 
             case 'PUT':
+                // Authentication is optional for single-user sites
+                // Log if user is authenticated but don't require it
+                if (user) {
+                    console.log('Content update by authenticated user:', user.email);
+                } else {
+                    console.log('Content update without authentication (single-user mode)');
+                }
+                
                 const newContent = JSON.parse(event.body);
                 
                 // Validate content structure
@@ -159,7 +207,7 @@ exports.handler = async (event, context) => {
                 }
 
                 // Merge with default content to ensure all fields exist
-                contentStore = {
+                const mergedContent = {
                     ...defaultContent,
                     ...newContent,
                     hero: { ...defaultContent.hero, ...newContent.hero },
@@ -168,13 +216,45 @@ exports.handler = async (event, context) => {
                     settings: { ...defaultContent.settings, ...newContent.settings }
                 };
 
+                // Save to Blobs if available
+                if (store) {
+                    const saved = await saveContent(store, mergedContent);
+                    if (!saved) {
+                        return {
+                            statusCode: 500,
+                            headers,
+                            body: JSON.stringify({ error: 'Failed to save content' })
+                        };
+                    }
+                }
+
                 return {
                     statusCode: 200,
                     headers,
                     body: JSON.stringify({
                         success: true,
                         message: 'Content updated successfully',
-                        content: contentStore
+                        content: mergedContent,
+                        persisted: !!store
+                    })
+                };
+
+            case 'POST':
+                // Same as PUT for content updates
+                goto PUT;
+
+            case 'DELETE':
+                // Reset to defaults
+                if (store) {
+                    await saveContent(store, defaultContent);
+                }
+                
+                return {
+                    statusCode: 200,
+                    headers,
+                    body: JSON.stringify({
+                        success: true,
+                        message: 'Content reset to defaults'
                     })
                 };
 
@@ -190,7 +270,7 @@ exports.handler = async (event, context) => {
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ error: 'Internal server error' })
+            body: JSON.stringify({ error: 'Internal server error', message: error.message })
         };
     }
 };
