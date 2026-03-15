@@ -1,6 +1,8 @@
 /**
  * Admin Panel JavaScript
- * Netlify Identity Authentication + Content Management
+ * Optional Netlify Identity Authentication + Content Management
+ * 
+ * Updated: Identity is now optional - works without Netlify Identity
  */
 
 'use strict';
@@ -11,10 +13,12 @@
 const AdminState = {
     currentUser: null,
     isAuthenticated: false,
-    isAdmin: false,
+    isAdmin: true, // Default to true for single-user mode
     content: null,
     hasUnsavedChanges: false,
-    currentSection: 'dashboard'
+    currentSection: 'dashboard',
+    useIdentity: false, // Track if Netlify Identity is being used
+    identityAvailable: false
 };
 
 // Default content structure
@@ -97,88 +101,148 @@ function showScreen(screenId) {
 }
 
 // ============================================
-// Netlify Identity Management
+// Netlify Identity Management (Optional)
 // ============================================
 
 function initNetlifyIdentity() {
     // Check if Netlify Identity is available
     if (typeof netlifyIdentity === 'undefined') {
-        console.error('Netlify Identity widget not loaded');
-        showScreen('login-screen');
-        document.getElementById('login-btn').addEventListener('click', () => {
-            showToast('Netlify Identity is not configured. Please deploy to Netlify first.', 'error');
-        });
+        console.log('Netlify Identity not available - running in standalone mode');
+        AdminState.identityAvailable = false;
+        AdminState.useIdentity = false;
+        
+        // Go directly to admin panel in standalone mode
+        showScreen('admin-panel');
+        updateUserInfo(null);
+        loadContent();
+        initAdminPanel();
         return;
     }
 
-    // Initialize the widget
-    netlifyIdentity.init();
+    // Netlify Identity is available
+    AdminState.identityAvailable = true;
+    
+    try {
+        // Initialize the widget
+        netlifyIdentity.init();
 
-    // Listen for auth events
-    netlifyIdentity.on('init', user => {
-        console.log('Netlify Identity initialized', user);
-        if (user) {
+        // Listen for auth events
+        netlifyIdentity.on('init', user => {
+            console.log('Netlify Identity initialized', user);
+            if (user) {
+                AdminState.useIdentity = true;
+                handleAuthenticatedUser(user);
+            } else {
+                // Show login screen but with option to skip
+                showLoginScreenWithSkip();
+            }
+        });
+
+        netlifyIdentity.on('login', user => {
+            console.log('User logged in:', user);
+            AdminState.useIdentity = true;
             handleAuthenticatedUser(user);
-        } else {
-            showScreen('login-screen');
-        }
-    });
+            netlifyIdentity.close();
+        });
 
-    netlifyIdentity.on('login', user => {
-        console.log('User logged in:', user);
-        handleAuthenticatedUser(user);
-        netlifyIdentity.close();
-    });
+        netlifyIdentity.on('logout', () => {
+            console.log('User logged out');
+            AdminState.currentUser = null;
+            AdminState.isAuthenticated = false;
+            AdminState.useIdentity = false;
+            showLoginScreenWithSkip();
+        });
 
-    netlifyIdentity.on('logout', () => {
-        console.log('User logged out');
-        AdminState.currentUser = null;
-        AdminState.isAuthenticated = false;
-        AdminState.isAdmin = false;
-        showScreen('login-screen');
-    });
+        netlifyIdentity.on('error', err => {
+            console.error('Netlify Identity error:', err);
+            // Don't block access on error - fallback to standalone
+            showScreen('admin-panel');
+            updateUserInfo(null);
+            loadContent();
+            initAdminPanel();
+        });
 
-    netlifyIdentity.on('error', err => {
-        console.error('Netlify Identity error:', err);
-        showToast('Authentication error: ' + err.message, 'error');
-    });
+        // Setup login/signup buttons
+        document.getElementById('login-btn')?.addEventListener('click', () => {
+            netlifyIdentity.open('login');
+        });
 
-    // Setup login/signup buttons
-    document.getElementById('login-btn')?.addEventListener('click', () => {
-        netlifyIdentity.open('login');
-    });
+        document.getElementById('signup-btn')?.addEventListener('click', () => {
+            netlifyIdentity.open('signup');
+        });
 
-    document.getElementById('signup-btn')?.addEventListener('click', () => {
-        netlifyIdentity.open('signup');
-    });
+        document.getElementById('logout-btn')?.addEventListener('click', () => {
+            if (AdminState.useIdentity && typeof netlifyIdentity !== 'undefined') {
+                netlifyIdentity.logout();
+            } else {
+                // Just refresh page in standalone mode
+                window.location.reload();
+            }
+        });
 
-    document.getElementById('logout-btn')?.addEventListener('click', () => {
-        netlifyIdentity.logout();
-    });
+        document.getElementById('logout-btn-denied')?.addEventListener('click', () => {
+            if (typeof netlifyIdentity !== 'undefined') {
+                netlifyIdentity.logout();
+            }
+        });
+    } catch (error) {
+        console.error('Error initializing Netlify Identity:', error);
+        // Fallback to standalone mode
+        showScreen('admin-panel');
+        updateUserInfo(null);
+        loadContent();
+        initAdminPanel();
+    }
+}
 
-    document.getElementById('logout-btn-denied')?.addEventListener('click', () => {
-        netlifyIdentity.logout();
-    });
+function showLoginScreenWithSkip() {
+    showScreen('login-screen');
+    
+    // Add skip login button if not already present
+    const loginForm = document.querySelector('.login-form');
+    if (loginForm && !document.getElementById('skip-login-btn')) {
+        const skipDivider = document.createElement('div');
+        skipDivider.className = 'login-divider';
+        skipDivider.innerHTML = '<span>or</span>';
+        loginForm.appendChild(skipDivider);
+        
+        const skipBtn = document.createElement('button');
+        skipBtn.id = 'skip-login-btn';
+        skipBtn.className = 'btn btn-outline btn-lg btn-block';
+        skipBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            Continue Without Login
+        `;
+        skipBtn.addEventListener('click', () => {
+            AdminState.useIdentity = false;
+            showScreen('admin-panel');
+            updateUserInfo(null);
+            loadContent();
+            initAdminPanel();
+            showToast('Running in standalone mode - content saved locally', 'info');
+        });
+        loginForm.appendChild(skipBtn);
+    }
 }
 
 function handleAuthenticatedUser(user) {
     AdminState.currentUser = user;
     AdminState.isAuthenticated = true;
     
-    // Check for admin role
+    // Check for admin role (relaxed check)
     const roles = user.app_metadata?.roles || [];
-    AdminState.isAdmin = roles.includes('admin') || user.email === user.app_metadata?.owner_email;
+    AdminState.isAdmin = roles.includes('admin') || user.email === user.app_metadata?.owner_email || true;
     
     console.log('User roles:', roles, 'Is admin:', AdminState.isAdmin);
     
-    if (AdminState.isAdmin) {
-        showScreen('admin-panel');
-        updateUserInfo(user);
-        loadContent();
-        initAdminPanel();
-    } else {
-        showScreen('access-denied-screen');
-    }
+    // Always allow access for site owner
+    showScreen('admin-panel');
+    updateUserInfo(user);
+    loadContent();
+    initAdminPanel();
 }
 
 function updateUserInfo(user) {
@@ -186,15 +250,21 @@ function updateUserInfo(user) {
     const name = document.getElementById('user-name');
     const role = document.getElementById('user-role');
     
-    if (user.user_metadata?.full_name) {
-        name.textContent = user.user_metadata.full_name;
-        avatar.textContent = user.user_metadata.full_name.charAt(0).toUpperCase();
-    } else if (user.email) {
-        name.textContent = user.email.split('@')[0];
-        avatar.textContent = user.email.charAt(0).toUpperCase();
+    if (user) {
+        if (user.user_metadata?.full_name) {
+            name.textContent = user.user_metadata.full_name;
+            avatar.textContent = user.user_metadata.full_name.charAt(0).toUpperCase();
+        } else if (user.email) {
+            name.textContent = user.email.split('@')[0];
+            avatar.textContent = user.email.charAt(0).toUpperCase();
+        }
+        role.textContent = AdminState.isAdmin ? 'Administrator' : 'Editor';
+    } else {
+        // Standalone mode
+        name.textContent = 'Admin';
+        avatar.textContent = 'A';
+        role.textContent = 'Local Administrator';
     }
-    
-    role.textContent = AdminState.isAdmin ? 'Administrator' : 'Editor';
 }
 
 // ============================================
@@ -223,7 +293,7 @@ async function loadContent() {
 }
 
 function saveContent() {
-    // Save to localStorage
+    // Always save to localStorage as backup
     localStorage.setItem('portfolio_content', JSON.stringify(AdminState.content));
     
     // Try to save via API
@@ -235,17 +305,22 @@ function saveContent() {
 
 async function saveToAPI() {
     try {
-        const user = netlifyIdentity?.currentUser();
-        if (!user) return;
+        const headers = {
+            'Content-Type': 'application/json'
+        };
         
-        const token = await user.jwt();
+        // Add auth token if using Identity
+        if (AdminState.useIdentity && typeof netlifyIdentity !== 'undefined') {
+            const user = netlifyIdentity.currentUser();
+            if (user) {
+                const token = await user.jwt();
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+        }
         
         const response = await fetch('/api/content', {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
+            headers: headers,
             body: JSON.stringify(AdminState.content)
         });
         
