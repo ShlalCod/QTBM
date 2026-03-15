@@ -1,14 +1,7 @@
 [build]
   publish = "."
+  functions = "netlify/functions"
 
-# حماية صفحة الإدارة فقط للمديرين
-[[redirects]]
-  from = "/admin.html"
-  to = "/admin.html"
-  status = 200
-  conditions = {Role = ["admin", "editor"]}
-
-# السماح للـ Functions بالعمل
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
