@@ -3,6 +3,7 @@
 // Uses Netlify Blobs for persistent storage
 // Authentication is optional for single-user sites
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { getStore } = require('@netlify/blobs');
 
 const defaultContent = {
@@ -240,8 +241,45 @@ exports.handler = async (event, context) => {
                 };
 
             case 'POST':
-                // Same as PUT for content updates
-                goto PUT;
+                // Same as PUT for content updates - fallthrough
+                // falls through to PUT handling
+                // intentional fallthrough
+                // Note: POST is handled the same as PUT
+                {
+                    const newContent = JSON.parse(event.body);
+                    
+                    if (!newContent || typeof newContent !== 'object') {
+                        return {
+                            statusCode: 400,
+                            headers,
+                            body: JSON.stringify({ error: 'Invalid content format' })
+                        };
+                    }
+
+                    const mergedContent = {
+                        ...defaultContent,
+                        ...newContent,
+                        hero: { ...defaultContent.hero, ...newContent.hero },
+                        about: { ...defaultContent.about, ...newContent.about },
+                        contact: { ...defaultContent.contact, ...newContent.contact },
+                        settings: { ...defaultContent.settings, ...newContent.settings }
+                    };
+
+                    if (store) {
+                        await saveContent(store, mergedContent);
+                    }
+
+                    return {
+                        statusCode: 200,
+                        headers,
+                        body: JSON.stringify({
+                            success: true,
+                            message: 'Content updated successfully',
+                            content: mergedContent,
+                            persisted: !!store
+                        })
+                    };
+                }
 
             case 'DELETE':
                 // Reset to defaults
